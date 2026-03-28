@@ -166,4 +166,4 @@ const migrate = async () => {
   }
 };
 
-migrate();
+module.exports = { migrate };
