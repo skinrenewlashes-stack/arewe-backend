@@ -4,6 +4,7 @@ const getProfile = async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT u.id, u.email, u.is_verified, u.is_18_confirmed, u.created_at,
+              u.first_name AS "firstName",
               p.notification_new_match, p.notification_connection_request,
               p.notification_payment_required, p.notification_request_accepted,
               p.notification_request_declined, p.notification_request_expired,
@@ -99,7 +100,7 @@ const deleteAccount = async (req, res) => {
     // Soft delete: anonymize and deactivate — keep rows for data integrity
     await client.query(
       `UPDATE users
-       SET email = $1, password_hash = '', is_active = FALSE,
+       SET email = $1, password_hash = '', first_name = NULL, is_active = FALSE,
            refresh_token = NULL, push_token = NULL, updated_at = NOW()
        WHERE id = $2`,
       [`deleted_${userId}@arewe.deleted`, userId]

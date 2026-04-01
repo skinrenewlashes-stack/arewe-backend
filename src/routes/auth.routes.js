@@ -12,6 +12,7 @@ const passwordRules = body('password')
 
 router.post('/register',
   [
+    body('firstName').optional({ values: 'falsy' }).trim().isLength({ min: 1, max: 100 }).withMessage('First name must be between 1 and 100 characters'),
     body('email').isEmail().normalizeEmail().withMessage('Valid email required'),
     passwordRules,
     body('is18Confirmed').isBoolean().equals('true').withMessage('You must confirm you are 18 or older'),

@@ -7,7 +7,7 @@ const { sendVerificationEmail, sendPasswordResetEmail } = require('../utils/emai
 const register = async (req, res) => {
   const client = await pool.connect();
   try {
-    const { email, password, is18Confirmed } = req.body;
+    const { firstName, email, password, is18Confirmed } = req.body;
 
     if (!is18Confirmed) {
       return res.status(400).json({ success: false, message: 'You must confirm you are 18 or older to use AreWe?' });
@@ -23,8 +23,8 @@ const register = async (req, res) => {
     await client.query('BEGIN');
 
     const userResult = await client.query(
-      `INSERT INTO users (email, password_hash, is_18_confirmed) VALUES ($1, $2, $3) RETURNING id, email`,
-      [email.toLowerCase(), passwordHash, true]
+      `INSERT INTO users (email, password_hash, is_18_confirmed, first_name) VALUES ($1, $2, $3, $4) RETURNING id, email, first_name`,
+      [email.toLowerCase(), passwordHash, true, firstName?.trim() || null]
     );
     const user = userResult.rows[0];
 
@@ -57,7 +57,7 @@ const register = async (req, res) => {
       success: true,
       message: 'Account created. Please check your email to verify your account.',
       data: {
-        user: { id: user.id, email: user.email, isVerified: false, is18Confirmed: true },
+        user: { id: user.id, firstName: user.first_name, email: user.email, isVerified: false, is18Confirmed: true },
         accessToken,
         refreshToken,
       },
@@ -77,6 +77,7 @@ const login = async (req, res) => {
 
     const result = await pool.query(
       `SELECT id, email, password_hash, is_verified, is_18_confirmed, is_active, is_blocked 
+       , first_name
        FROM users WHERE email = $1`,
       [email.toLowerCase()]
     );
@@ -111,6 +112,7 @@ const login = async (req, res) => {
       data: {
         user: {
           id: user.id,
+          firstName: user.first_name,
           email: user.email,
           isVerified: user.is_verified,
           is18Confirmed: user.is_18_confirmed,
@@ -292,6 +294,7 @@ const getMe = async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT u.id, u.email, u.is_verified, u.is_18_confirmed, u.created_at,
+              u.first_name AS "firstName",
               p.notification_new_match, p.email_notifications, p.push_notifications
        FROM users u
        LEFT JOIN user_profiles p ON u.id = p.user_id

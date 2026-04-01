@@ -18,6 +18,10 @@ app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
 
 app.use(helmet());
 app.use(cors());
+app.use((req, res, next) => {
+  res.setHeader('X-App-Author', 'Helene Tcheby');
+  next();
+});
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

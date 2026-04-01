@@ -13,6 +13,7 @@ const migrate = async () => {
       CREATE TABLE IF NOT EXISTS users (
         id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
         email VARCHAR(255) UNIQUE NOT NULL,
+        first_name VARCHAR(100),
         password_hash VARCHAR(255) NOT NULL,
         is_verified BOOLEAN DEFAULT FALSE,
         is_18_confirmed BOOLEAN DEFAULT FALSE,
@@ -153,6 +154,8 @@ const migrate = async () => {
       CREATE INDEX IF NOT EXISTS idx_connections_recipient ON connection_requests(recipient_id);
       CREATE INDEX IF NOT EXISTS idx_connections_match ON connection_requests(match_id);
       CREATE INDEX IF NOT EXISTS idx_connections_status ON connection_requests(status);
+
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name VARCHAR(100);
     `);
     await client.query('COMMIT');
     console.log('✅ Full schema migrated successfully');
