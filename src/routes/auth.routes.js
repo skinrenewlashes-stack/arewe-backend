@@ -63,6 +63,8 @@ router.post('/refresh-token',
   authController.refreshToken
 );
 
+router.post('/biometric/enable', authenticate, authController.enableBiometric);
+
 router.post('/logout', authenticate, authController.logout);
 
 router.get('/me', authenticate, authController.getMe);

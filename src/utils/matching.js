@@ -16,6 +16,8 @@
  * - Return per-category breakdown: 'match' | 'partial' | 'none'
  */
 
+const levenshtein = require('fast-levenshtein');
+
 const WEIGHTS = {
   firstName: 25,
   location: 20,
@@ -28,23 +30,54 @@ const WEIGHTS = {
 
 const AGE_RANGE_ORDER = ['18-24', '25-30', '31-35', '36-40', '41-45', '46-50', '51+'];
 
-function normalize(str) {
+function normalizeString(str) {
   if (!str) return '';
-  return str.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  return str
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function normalize(str) {
+  return normalizeString(str).replace(/[^a-z0-9]/g, '');
+}
+
+function similarity(a, b) {
+  const distance = levenshtein.get(a, b);
+  const maxLength = Math.max(a.length, b.length);
+  return maxLength === 0 ? 1 : 1 - distance / maxLength;
+}
+
+function isNameMatch(a, b) {
+  const normalizedA = normalizeString(a);
+  const normalizedB = normalizeString(b);
+  if (!normalizedA || !normalizedB) return false;
+  return similarity(normalizedA, normalizedB) > 0.8;
+}
+
+function isCityMatch(a, b) {
+  const normalizedA = normalizeString(a);
+  const normalizedB = normalizeString(b);
+  if (!normalizedA || !normalizedB) return false;
+  return similarity(normalizedA, normalizedB) > 0.75;
 }
 
 function scoreFirstName(a, b) {
   if (!a || !b) return null;
+  const normalizedA = normalizeString(a);
+  const normalizedB = normalizeString(b);
   const na = normalize(a);
   const nb = normalize(b);
-  if (na === nb) return { score: 1, status: 'match' };
+  if (normalizedA === normalizedB) return { score: 1, status: 'exact' };
+  if (isNameMatch(a, b)) return { score: 0.5, status: 'partial' };
   if (na.startsWith(nb) || nb.startsWith(na)) return { score: 0.5, status: 'partial' };
   return { score: 0, status: 'none' };
 }
 
 function scoreLocation(cityA, stateA, cityB, stateB) {
   if (!cityA || !stateA || !cityB || !stateB) return null;
-  const cityMatch = normalize(cityA) === normalize(cityB);
+  const cityMatch = normalize(cityA) === normalize(cityB) || isCityMatch(cityA, cityB);
   const stateMatch = normalize(stateA) === normalize(stateB);
   if (cityMatch && stateMatch) return { score: 1, status: 'match' };
   if (stateMatch) return { score: 0.4, status: 'partial' };
@@ -64,15 +97,19 @@ function scoreAgeRange(a, b) {
 
 function scoreRace(a, b) {
   if (!a || !b) return null;
-  if (normalize(a) === normalize(b)) return { score: 1, status: 'match' };
+  const normalizedA = normalizeString(a);
+  const normalizedB = normalizeString(b);
+  if (normalizedA === normalizedB) return { score: 1, status: 'match' };
   return { score: 0, status: 'none' };
 }
 
 function scoreIndustry(a, b) {
   if (!a || !b) return null;
-  if (normalize(a) === normalize(b)) return { score: 1, status: 'match' };
-  const wordsA = normalize(a).split(/\s+/);
-  const wordsB = normalize(b).split(/\s+/);
+  const normalizedA = normalizeString(a);
+  const normalizedB = normalizeString(b);
+  if (normalizedA === normalizedB) return { score: 1, status: 'match' };
+  const wordsA = normalizedA.split(/\s+/);
+  const wordsB = normalizedB.split(/\s+/);
   const shared = wordsA.filter((w) => w.length > 3 && wordsB.includes(w));
   if (shared.length > 0) return { score: 0.5, status: 'partial' };
   return { score: 0, status: 'none' };
@@ -93,9 +130,11 @@ function scoreLifestyle(a, b) {
 
 function scoreCarModel(a, b) {
   if (!a || !b) return null;
-  if (normalize(a) === normalize(b)) return { score: 1, status: 'match' };
-  const wordsA = normalize(a).split(/\s+/);
-  const wordsB = normalize(b).split(/\s+/);
+  const normalizedA = normalizeString(a);
+  const normalizedB = normalizeString(b);
+  if (normalizedA === normalizedB) return { score: 1, status: 'match' };
+  const wordsA = normalizedA.split(/\s+/);
+  const wordsB = normalizedB.split(/\s+/);
   const shared = wordsA.filter((w) => w.length > 2 && wordsB.includes(w));
   if (shared.length > 0) return { score: 0.5, status: 'partial' };
   return { score: 0, status: 'none' };
@@ -139,7 +178,12 @@ function computeMatch(subA, subB) {
     breakdown[field] = result.status;
   }
 
-  const percentage = totalWeight === 0 ? 0 : Math.round((earnedScore / totalWeight) * 100);
+  let percentage = totalWeight === 0 ? 0 : Math.round((earnedScore / totalWeight) * 100);
+
+  if (scores.firstName && scores.firstName.score === 0 && percentage > 70) {
+    percentage = 70;
+  }
+
   const tier = getTier(percentage);
 
   return { percentage, tier, breakdown };

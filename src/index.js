@@ -20,6 +20,7 @@ app.use(helmet());
 app.use(cors());
 app.use((req, res, next) => {
   res.setHeader('X-App-Author', 'Helene Tcheby');
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
   next();
 });
 app.use(express.json());

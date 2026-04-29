@@ -9,18 +9,20 @@
     "migrate": "node src/config/migrate.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "pg": "^8.11.3",
     "bcryptjs": "^2.4.3",
-    "jsonwebtoken": "^9.0.2",
-    "dotenv": "^16.3.1",
     "cors": "^2.8.5",
-    "express-validator": "^7.0.1",
-    "nodemailer": "^6.9.7",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
     "express-rate-limit": "^7.1.5",
+    "express-validator": "^7.0.1",
+    "fast-levenshtein": "^3.0.0",
     "helmet": "^7.1.0",
-    "uuid": "^9.0.0",
-    "stripe": "^14.25.0"
+    "jsonwebtoken": "^9.0.2",
+    "nodemailer": "^6.9.7",
+    "pg": "^8.11.3",
+    "string-similarity": "^4.0.4",
+    "stripe": "^14.25.0",
+    "uuid": "^9.0.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"

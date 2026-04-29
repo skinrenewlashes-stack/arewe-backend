@@ -51,6 +51,12 @@ const register = async (req, res) => {
     const accessToken = generateAccessToken(user.id);
     const refreshToken = generateRefreshToken(user.id);
 
+    await pool.query(
+      `INSERT INTO refresh_tokens (user_id, token, token_type, expires_at)
+       VALUES ($1, $2, 'session', NOW() + INTERVAL '30 days')`,
+      [user.id, refreshToken]
+    );
+
     await pool.query('UPDATE users SET refresh_token = $1 WHERE id = $2', [refreshToken, user.id]);
 
     return res.status(201).json({
@@ -103,6 +109,12 @@ const login = async (req, res) => {
 
     const accessToken = generateAccessToken(user.id);
     const refreshToken = generateRefreshToken(user.id);
+
+    await pool.query(
+      `INSERT INTO refresh_tokens (user_id, token, token_type, expires_at)
+       VALUES ($1, $2, 'session', NOW() + INTERVAL '30 days')`,
+      [user.id, refreshToken]
+    );
 
     await pool.query('UPDATE users SET refresh_token = $1, updated_at = NOW() WHERE id = $2', [refreshToken, user.id]);
 
@@ -252,8 +264,50 @@ const refreshToken = async (req, res) => {
 
     const decoded = verifyToken(token);
 
+    const tokenResult = await pool.query(
+      `SELECT rt.id AS token_id, rt.token_type, rt.user_id, u.id, u.is_active, u.is_blocked
+       FROM refresh_tokens rt
+       JOIN users u ON u.id = rt.user_id
+       WHERE rt.token = $1
+         AND rt.user_id = $2
+         AND rt.is_revoked = FALSE
+         AND rt.expires_at > NOW()`,
+      [token, decoded.userId]
+    );
+
+    if (tokenResult.rows.length) {
+      const user = tokenResult.rows[0];
+
+      if (!user.is_active) {
+        return res.status(401).json({ success: false, message: 'Account deactivated' });
+      }
+
+      if (user.is_blocked) {
+        return res.status(403).json({ success: false, message: 'Account suspended' });
+      }
+
+      const newAccessToken = generateAccessToken(user.id);
+      const newRefreshToken = generateRefreshToken(user.id);
+
+      await pool.query(
+        'UPDATE refresh_tokens SET is_revoked = TRUE, updated_at = NOW() WHERE id = $1',
+        [user.token_id]
+      );
+      await pool.query(
+        `INSERT INTO refresh_tokens (user_id, token, token_type, expires_at)
+         VALUES ($1, $2, $3, NOW() + INTERVAL '30 days')`,
+        [user.id, newRefreshToken, user.token_type]
+      );
+      await pool.query('UPDATE users SET refresh_token = $1 WHERE id = $2', [newRefreshToken, user.id]);
+
+      return res.status(200).json({
+        success: true,
+        data: { accessToken: newAccessToken, refreshToken: newRefreshToken },
+      });
+    }
+
     const result = await pool.query(
-      'SELECT id, refresh_token, is_active FROM users WHERE id = $1',
+      'SELECT id, refresh_token, is_active, is_blocked FROM users WHERE id = $1',
       [decoded.userId]
     );
 
@@ -266,9 +320,18 @@ const refreshToken = async (req, res) => {
       return res.status(401).json({ success: false, message: 'Account deactivated' });
     }
 
+    if (user.is_blocked) {
+      return res.status(403).json({ success: false, message: 'Account suspended' });
+    }
+
     const newAccessToken = generateAccessToken(user.id);
     const newRefreshToken = generateRefreshToken(user.id);
 
+    await pool.query(
+      `INSERT INTO refresh_tokens (user_id, token, token_type, expires_at)
+       VALUES ($1, $2, 'session', NOW() + INTERVAL '30 days')`,
+      [user.id, newRefreshToken]
+    );
     await pool.query('UPDATE users SET refresh_token = $1 WHERE id = $2', [newRefreshToken, user.id]);
 
     return res.status(200).json({
@@ -282,11 +345,42 @@ const refreshToken = async (req, res) => {
 
 const logout = async (req, res) => {
   try {
-    await pool.query('UPDATE users SET refresh_token = NULL WHERE id = $1', [req.user.id]);
+    await pool.query(
+      `UPDATE refresh_tokens
+       SET is_revoked = TRUE,
+           revoked_at = NOW(),
+           updated_at = NOW()
+       WHERE user_id = $1
+       AND token_type = 'session'
+       AND is_revoked = FALSE`,
+      [req.user.id]
+    );
     return res.status(200).json({ success: true, message: 'Logged out successfully' });
   } catch (err) {
     console.error('Logout error:', err);
     return res.status(500).json({ success: false, message: 'Logout failed' });
+  }
+};
+
+const enableBiometric = async (req, res) => {
+  try {
+    const newRefreshToken = generateRefreshToken(req.user.id);
+
+    await pool.query(
+      `INSERT INTO refresh_tokens (user_id, token, token_type, expires_at)
+       VALUES ($1, $2, 'biometric', NOW() + INTERVAL '30 days')`,
+      [req.user.id, newRefreshToken]
+    );
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        refreshToken: newRefreshToken,
+      },
+    });
+  } catch (err) {
+    console.error('Enable biometric error:', err);
+    return res.status(500).json({ success: false, message: 'Could not enable biometric login' });
   }
 };
 
@@ -313,4 +407,4 @@ const getMe = async (req, res) => {
   }
 };
 
-module.exports = { register, login, verifyEmail, resendVerification, forgotPassword, resetPassword, refreshToken, logout, getMe };
+module.exports = { register, login, verifyEmail, resendVerification, forgotPassword, resetPassword, refreshToken, logout, enableBiometric, getMe };
