@@ -25,6 +25,23 @@ const migrate = async () => {
         updated_at TIMESTAMP DEFAULT NOW()
       );
 
+      CREATE TABLE IF NOT EXISTS refresh_tokens (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        token TEXT NOT NULL UNIQUE,
+        token_type VARCHAR(30) NOT NULL CHECK (token_type IN ('session', 'biometric')),
+        device_id TEXT,
+        is_revoked BOOLEAN DEFAULT FALSE,
+        revoked_at TIMESTAMP,
+        expires_at TIMESTAMP NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens(user_id);
+      CREATE INDEX IF NOT EXISTS idx_refresh_tokens_token ON refresh_tokens(token);
+      CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_type_device ON refresh_tokens(user_id, token_type, device_id);
+
       CREATE TABLE IF NOT EXISTS user_profiles (
         id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
         user_id UUID UNIQUE REFERENCES users(id) ON DELETE CASCADE,
