@@ -275,6 +275,39 @@ const resetPassword = async (req, res) => {
   }
 };
 
+const resetPasswordRedirect = (req, res) => {
+  const { token = '' } = req.query;
+  const appLink = `arewe://reset-password?token=${encodeURIComponent(token)}`;
+
+  return res.status(200).type('html').send(`
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Reset your password</title>
+      </head>
+      <body style="margin:0;background:#050505;color:#f5f5f5;font-family:Arial,Helvetica,sans-serif;">
+        <main style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;">
+          <section style="max-width:520px;width:100%;background:#0d0d0d;border:1px solid #2a2415;border-radius:12px;padding:36px 28px;text-align:center;">
+            <div style="color:#D4AF37;font-size:28px;font-weight:700;margin-bottom:8px;">AreWe?</div>
+            <h1 style="margin:0 0 16px;color:#ffffff;font-size:26px;line-height:1.25;">Opening the app</h1>
+            <p style="margin:0 0 20px;color:#d8d8d8;font-size:16px;line-height:1.6;">
+              If the app does not open, copy this link:
+            </p>
+            <p style="margin:0;color:#D4AF37;font-size:14px;line-height:1.6;word-break:break-all;">
+              ${appLink}
+            </p>
+          </section>
+        </main>
+        <script>
+          window.location.href = ${JSON.stringify(appLink)};
+        </script>
+      </body>
+    </html>
+  `);
+};
+
 const refreshToken = async (req, res) => {
   try {
     const { refreshToken: token } = req.body;
@@ -437,4 +470,4 @@ const getMe = async (req, res) => {
   }
 };
 
-module.exports = { register, login, verifyEmail, resendVerification, forgotPassword, resetPassword, refreshToken, logout, enableBiometric, getMe };
+module.exports = { register, login, verifyEmail, resendVerification, forgotPassword, resetPassword, resetPasswordRedirect, refreshToken, logout, enableBiometric, getMe };

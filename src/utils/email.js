@@ -53,7 +53,7 @@ const sendPasswordResetEmail = async (email, token) => {
     subject: 'Reset your AreWe? password',
     html: `
       <p>Click the link below to reset your password:</p>
-      <a href="arewe://reset-password?token=${token}">
+      <a href="${process.env.API_URL}/auth/reset-password-redirect?token=${token}">
         Reset Password
       </a>
     `,

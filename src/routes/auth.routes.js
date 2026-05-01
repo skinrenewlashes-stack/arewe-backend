@@ -57,6 +57,8 @@ router.post('/reset-password',
   authController.resetPassword
 );
 
+router.get('/reset-password-redirect', authController.resetPasswordRedirect);
+
 router.post('/refresh-token',
   [body('refreshToken').notEmpty().withMessage('Refresh token required')],
   validate,
