@@ -48,24 +48,11 @@ const register = async (req, res) => {
       console.error('Email send failed:', emailErr.message);
     }
 
-    const accessToken = generateAccessToken(user.id);
-    const refreshToken = generateRefreshToken(user.id);
-
-    await pool.query(
-      `INSERT INTO refresh_tokens (user_id, token, token_type, expires_at)
-       VALUES ($1, $2, 'session', NOW() + INTERVAL '30 days')`,
-      [user.id, refreshToken]
-    );
-
-    await pool.query('UPDATE users SET refresh_token = $1 WHERE id = $2', [refreshToken, user.id]);
-
     return res.status(201).json({
       success: true,
-      message: 'Account created. Please check your email to verify your account.',
+      message: 'Account created. Please verify your email before logging in.',
       data: {
         user: { id: user.id, firstName: user.first_name, email: user.email, isVerified: false, is18Confirmed: true },
-        accessToken,
-        refreshToken,
       },
     });
   } catch (err) {
@@ -107,6 +94,10 @@ const login = async (req, res) => {
       return res.status(401).json({ success: false, message: 'Invalid email or password' });
     }
 
+    if (!user.is_verified) {
+      return res.status(403).json({ success: false, message: 'Please verify your email before logging in.' });
+    }
+
     const accessToken = generateAccessToken(user.id);
     const refreshToken = generateRefreshToken(user.id);
 
@@ -139,6 +130,26 @@ const login = async (req, res) => {
   }
 };
 
+const renderEmailVerificationPage = ({ title, message }) => `
+  <!doctype html>
+  <html lang="en">
+    <head>
+      <meta charset="utf-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1" />
+      <title>${title}</title>
+    </head>
+    <body style="margin:0;background:#050505;color:#f5f5f5;font-family:Arial,Helvetica,sans-serif;">
+      <main style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;">
+        <section style="max-width:520px;width:100%;background:#0d0d0d;border:1px solid #2a2415;border-radius:12px;padding:36px 28px;text-align:center;">
+          <div style="color:#D4AF37;font-size:28px;font-weight:700;margin-bottom:8px;">AreWe?</div>
+          <h1 style="margin:0 0 16px;color:#ffffff;font-size:26px;line-height:1.25;">${title}</h1>
+          <p style="margin:0;color:#d8d8d8;font-size:16px;line-height:1.6;">${message}</p>
+        </section>
+      </main>
+    </body>
+  </html>
+`;
+
 const verifyEmail = async (req, res) => {
   try {
     const { token } = req.params;
@@ -149,7 +160,10 @@ const verifyEmail = async (req, res) => {
     );
 
     if (!result.rows.length) {
-      return res.status(400).json({ success: false, message: 'Invalid or expired verification link' });
+      return res.status(400).send(renderEmailVerificationPage({
+        title: 'Verification link unavailable',
+        message: 'This verification link is invalid or has expired. Please return to the AreWe? app and request a new verification email.',
+      }));
     }
 
     const record = result.rows[0];
@@ -157,10 +171,16 @@ const verifyEmail = async (req, res) => {
     await pool.query('UPDATE users SET is_verified = TRUE, updated_at = NOW() WHERE id = $1', [record.user_id]);
     await pool.query('UPDATE email_verification_tokens SET used = TRUE WHERE id = $1', [record.id]);
 
-    return res.status(200).json({ success: true, message: 'Email verified successfully' });
+    return res.status(200).send(renderEmailVerificationPage({
+      title: 'Email verified',
+      message: 'Your email has been verified successfully. You can now return to the AreWe? app and log in.',
+    }));
   } catch (err) {
     console.error('Verify email error:', err);
-    return res.status(500).json({ success: false, message: 'Verification failed. Please try again.' });
+    return res.status(500).send(renderEmailVerificationPage({
+      title: 'Verification failed',
+      message: 'We could not verify your email right now. Please return to the AreWe? app and try again.',
+    }));
   }
 };
 
