@@ -160,7 +160,7 @@ const verifyEmail = async (req, res) => {
     );
 
     if (!result.rows.length) {
-      return res.status(400).send(renderEmailVerificationPage({
+      return res.status(400).type('html').send(renderEmailVerificationPage({
         title: 'Verification link unavailable',
         message: 'This verification link is invalid or has expired. Please return to the AreWe? app and request a new verification email.',
       }));
@@ -171,13 +171,13 @@ const verifyEmail = async (req, res) => {
     await pool.query('UPDATE users SET is_verified = TRUE, updated_at = NOW() WHERE id = $1', [record.user_id]);
     await pool.query('UPDATE email_verification_tokens SET used = TRUE WHERE id = $1', [record.id]);
 
-    return res.status(200).send(renderEmailVerificationPage({
+    return res.status(200).type('html').send(renderEmailVerificationPage({
       title: 'Email verified',
       message: 'Your email has been verified successfully. You can now return to the AreWe? app and log in.',
     }));
   } catch (err) {
     console.error('Verify email error:', err);
-    return res.status(500).send(renderEmailVerificationPage({
+    return res.status(500).type('html').send(renderEmailVerificationPage({
       title: 'Verification failed',
       message: 'We could not verify your email right now. Please return to the AreWe? app and try again.',
     }));
