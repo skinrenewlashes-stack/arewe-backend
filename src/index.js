@@ -12,6 +12,7 @@ const connectionsRoutes = require('./routes/connections.routes');
 const usersRoutes = require('./routes/users.routes');
 
 const app = express();
+app.set('trust proxy', 1);
 
 // Stripe webhook needs raw body — must be before express.json()
 app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
