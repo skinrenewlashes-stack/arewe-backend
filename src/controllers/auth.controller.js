@@ -420,7 +420,17 @@ const getMe = async (req, res) => {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
-    return res.status(200).json({ success: true, data: { user: result.rows[0] } });
+    const user = result.rows[0];
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        user: {
+          ...user,
+          isVerified: user.is_verified,
+        },
+      },
+    });
   } catch (err) {
     console.error('Get me error:', err);
     return res.status(500).json({ success: false, message: 'Failed to fetch profile' });
