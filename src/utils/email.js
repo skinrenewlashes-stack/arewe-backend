@@ -14,6 +14,9 @@ const sendVerificationEmail = async (email, token) => {
       <div style="margin:0;padding:0;background:#050505;font-family:Arial,Helvetica,sans-serif;color:#f5f5f5;">
         <div style="max-width:560px;margin:0 auto;padding:40px 24px;">
           <div style="border:1px solid #2a2415;border-radius:12px;background:#0d0d0d;padding:32px;">
+            <div style="text-align:center;margin-bottom:16px;">
+              <img src="https://i.imgur.com/8qayZqy.png" alt="AreWe?" style="height:70px;width:auto;display:inline-block;" />
+            </div>
             <h1 style="margin:0 0 8px;color:#D4AF37;font-size:28px;line-height:1.2;">AreWe?</h1>
             <p style="margin:0 0 28px;color:#b8b8b8;font-size:14px;">Verify what matters.</p>
 
