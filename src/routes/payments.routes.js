@@ -26,4 +26,15 @@ router.post('/confirm',
   ctrl.confirmPayment
 );
 
+router.post('/google-play/verify',
+  authenticate,
+  [
+    body('matchId').notEmpty().withMessage('Match ID required'),
+    body('productId').notEmpty().withMessage('Product ID required'),
+    body('purchaseToken').notEmpty().withMessage('Purchase token required'),
+  ],
+  validate,
+  ctrl.verifyGooglePlayPurchase
+);
+
 module.exports = router;

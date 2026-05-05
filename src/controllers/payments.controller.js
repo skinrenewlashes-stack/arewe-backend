@@ -1,6 +1,10 @@
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const pool = require('../config/db');
 const { notifyConnectionRequest, notifyPaymentRequired } = require('../utils/notifications');
+const {
+  consumeGooglePlayProductPurchase,
+  verifyGooglePlayProductPurchase,
+} = require('../utils/googlePlay');
 
 /**
  * Create a Stripe PaymentIntent for a user to unlock a match.
@@ -205,6 +209,263 @@ const confirmPayment = async (req, res) => {
   }
 };
 
+const consumeVerifiedGooglePlayPurchase = async ({ productId, purchaseToken, matchId, userId }) => {
+  try {
+    await consumeGooglePlayProductPurchase({
+      packageName: process.env.GOOGLE_PLAY_PACKAGE_NAME,
+      productId,
+      purchaseToken,
+    });
+    console.log('Purchase consumed successfully', {
+      productId,
+      matchId,
+      userId,
+    });
+  } catch (err) {
+    console.warn('Purchase consumption failed after unlock:', {
+      message: err.message,
+      productId,
+      matchId,
+      userId,
+    });
+  }
+};
+
+const verifyGooglePlayPurchase = async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const userId = req.user.id;
+    const { matchId, productId, purchaseToken } = req.body;
+
+    if (!matchId || !productId || !purchaseToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'Match ID, product ID, and purchase token are required.',
+      });
+    }
+
+    if (productId !== 'match_unlock_499') {
+      return res.status(400).json({ success: false, message: 'Invalid product ID.' });
+    }
+
+    const matchResult = await client.query(
+      `SELECT id, user_a_id, user_b_id, user_a_unlocked, user_b_unlocked
+       FROM matches WHERE id = $1 AND is_active = TRUE`,
+      [matchId]
+    );
+
+    if (!matchResult.rows.length) {
+      return res.status(404).json({ success: false, message: 'Match not found.' });
+    }
+
+    const match = matchResult.rows[0];
+    const isUserA = match.user_a_id === userId;
+    const isUserB = match.user_b_id === userId;
+
+    if (!isUserA && !isUserB) {
+      return res.status(403).json({ success: false, message: 'Access denied.' });
+    }
+
+    const existingPurchase = await client.query(
+      `SELECT user_id, match_id FROM payments WHERE google_purchase_token = $1`,
+      [purchaseToken]
+    );
+
+    if (existingPurchase.rows.length > 0) {
+      console.warn('Google Play purchase token reuse rejected:', {
+        userId,
+        matchId,
+        productId,
+      });
+      return res.status(409).json({
+        success: false,
+        message: 'Purchase token has already been used.',
+      });
+    }
+
+    let verificationResult;
+
+    try {
+      verificationResult = await verifyGooglePlayProductPurchase({
+        packageName: process.env.GOOGLE_PLAY_PACKAGE_NAME,
+        productId,
+        purchaseToken,
+      });
+    } catch (err) {
+      console.error('Google Play verification failed before unlock:', {
+        message: err.message,
+        productId,
+        matchId,
+        userId,
+      });
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid or not completed purchase',
+      });
+    }
+
+    if (verificationResult.purchaseState !== 0) {
+      console.warn('Google Play purchase rejected due to purchaseState:', {
+        purchaseState: verificationResult.purchaseState,
+        productId,
+        matchId,
+        userId,
+      });
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid or not completed purchase',
+      });
+    }
+
+    if (![0, 1].includes(verificationResult.consumptionState)) {
+      console.warn('Google Play purchase rejected due to consumptionState:', {
+        consumptionState: verificationResult.consumptionState,
+        productId,
+        matchId,
+        userId,
+      });
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid or not completed purchase',
+      });
+    }
+
+    if (!verificationResult.orderId) {
+      console.warn('Google Play purchase rejected because orderId is missing:', {
+        productId,
+        matchId,
+        userId,
+      });
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid or not completed purchase',
+      });
+    }
+
+    console.log('Google Play purchase verified:', {
+      productId,
+      matchId,
+      userId,
+      purchaseState: verificationResult.purchaseState,
+      consumptionState: verificationResult.consumptionState,
+      hasOrderId: Boolean(verificationResult.orderId),
+    });
+
+    const alreadyUnlocked = isUserA ? match.user_a_unlocked : match.user_b_unlocked;
+    if (alreadyUnlocked) {
+      const existingMatchPayment = await client.query(
+        `SELECT id FROM payments WHERE user_id = $1 AND match_id = $2`,
+        [userId, matchId]
+      );
+
+      if (existingMatchPayment.rows.length) {
+        await client.query(
+          `UPDATE payments
+           SET google_purchase_token = $1,
+               google_order_id = $2,
+               status = 'succeeded',
+               updated_at = NOW()
+           WHERE user_id = $3 AND match_id = $4`,
+          [purchaseToken, verificationResult.orderId, userId, matchId]
+        );
+      } else {
+        await client.query(
+          `INSERT INTO payments
+             (user_id, match_id, google_purchase_token, google_order_id, amount_cents, status)
+           VALUES ($1, $2, $3, $4, 499, 'succeeded')
+           ON CONFLICT DO NOTHING`,
+          [userId, matchId, purchaseToken, verificationResult.orderId]
+        );
+      }
+
+      await consumeVerifiedGooglePlayPurchase({
+        productId,
+        purchaseToken,
+        matchId,
+        userId,
+      });
+
+      return res.json({
+        success: true,
+        message: 'Match already unlocked.',
+        data: { matchId, unlocked: true },
+      });
+    }
+
+    const existingMatchPayment = await client.query(
+      `SELECT id FROM payments WHERE user_id = $1 AND match_id = $2`,
+      [userId, matchId]
+    );
+
+    await client.query('BEGIN');
+
+    if (existingMatchPayment.rows.length) {
+      await client.query(
+        `UPDATE payments
+         SET google_purchase_token = $1,
+             google_order_id = $2,
+             status = 'succeeded',
+             updated_at = NOW()
+         WHERE user_id = $3 AND match_id = $4`,
+        [purchaseToken, verificationResult.orderId, userId, matchId]
+      );
+    } else {
+      await client.query(
+        `INSERT INTO payments
+           (user_id, match_id, google_purchase_token, google_order_id, amount_cents, status)
+         VALUES ($1, $2, $3, $4, 499, 'succeeded')
+         ON CONFLICT DO NOTHING`,
+        [userId, matchId, purchaseToken, verificationResult.orderId]
+      );
+    }
+
+    const unlockCol = isUserA ? 'user_a_unlocked' : 'user_b_unlocked';
+    const unlockAtCol = isUserA ? 'user_a_unlocked_at' : 'user_b_unlocked_at';
+
+    await client.query(
+      `UPDATE matches
+       SET ${unlockCol} = TRUE, ${unlockAtCol} = NOW(), updated_at = NOW()
+       WHERE id = $1`,
+      [matchId]
+    );
+
+    const reqResult = await client.query(
+      `SELECT id FROM connection_requests
+       WHERE match_id = $1 AND recipient_id = $2 AND status = 'payment_required'`,
+      [matchId, userId]
+    );
+
+    if (reqResult.rows.length > 0) {
+      await client.query(
+        `UPDATE connection_requests SET status = 'pending', updated_at = NOW()
+         WHERE id = $1`,
+        [reqResult.rows[0].id]
+      );
+    }
+
+    await client.query('COMMIT');
+
+    await consumeVerifiedGooglePlayPurchase({
+      productId,
+      purchaseToken,
+      matchId,
+      userId,
+    });
+
+    return res.json({
+      success: true,
+      message: 'Payment confirmed. Match unlocked.',
+      data: { matchId, unlocked: true },
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Google Play verify error:', err);
+    return res.status(500).json({ success: false, message: 'Payment confirmation failed.' });
+  } finally {
+    client.release();
+  }
+};
+
 /**
  * Stripe webhook handler
  * Handles payment_intent.succeeded and payment_intent.payment_failed events
@@ -296,4 +557,9 @@ const stripeWebhook = async (req, res) => {
   }
 };
 
-module.exports = { createPaymentIntent, confirmPayment, stripeWebhook };
+module.exports = {
+  createPaymentIntent,
+  confirmPayment,
+  verifyGooglePlayPurchase,
+  stripeWebhook,
+};

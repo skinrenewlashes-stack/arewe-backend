@@ -115,8 +115,10 @@ const migrate = async () => {
         id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
         user_id UUID REFERENCES users(id) ON DELETE CASCADE,
         match_id UUID REFERENCES matches(id) ON DELETE CASCADE,
-        stripe_payment_intent_id VARCHAR(255) UNIQUE NOT NULL,
+        stripe_payment_intent_id VARCHAR(255) UNIQUE,
         stripe_client_secret TEXT,
+        google_purchase_token VARCHAR(255),
+        google_order_id VARCHAR(255),
         amount_cents INTEGER NOT NULL DEFAULT 499,
         currency VARCHAR(10) NOT NULL DEFAULT 'usd',
         status VARCHAR(30) NOT NULL DEFAULT 'pending'
@@ -160,6 +162,11 @@ const migrate = async () => {
         created_at TIMESTAMP DEFAULT NOW()
       );
 
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name VARCHAR(100);
+      ALTER TABLE payments ALTER COLUMN stripe_payment_intent_id DROP NOT NULL;
+      ALTER TABLE payments ADD COLUMN IF NOT EXISTS google_purchase_token VARCHAR(255);
+      ALTER TABLE payments ADD COLUMN IF NOT EXISTS google_order_id VARCHAR(255);
+
       CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
       CREATE INDEX IF NOT EXISTS idx_submissions_user_id ON submissions(user_id);
       CREATE INDEX IF NOT EXISTS idx_submissions_active ON submissions(is_active);
@@ -167,12 +174,13 @@ const migrate = async () => {
       CREATE INDEX IF NOT EXISTS idx_matches_user_b ON matches(user_b_id);
       CREATE INDEX IF NOT EXISTS idx_payments_user_match ON payments(user_id, match_id);
       CREATE INDEX IF NOT EXISTS idx_payments_intent ON payments(stripe_payment_intent_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_google_purchase_token
+        ON payments(google_purchase_token)
+        WHERE google_purchase_token IS NOT NULL;
       CREATE INDEX IF NOT EXISTS idx_connections_requester ON connection_requests(requester_id);
       CREATE INDEX IF NOT EXISTS idx_connections_recipient ON connection_requests(recipient_id);
       CREATE INDEX IF NOT EXISTS idx_connections_match ON connection_requests(match_id);
       CREATE INDEX IF NOT EXISTS idx_connections_status ON connection_requests(status);
-
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name VARCHAR(100);
     `);
     await client.query('COMMIT');
     console.log('✅ Full schema migrated successfully');
