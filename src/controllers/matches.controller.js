@@ -9,6 +9,10 @@ const getMatches = async (req, res) => {
          m.id,
          m.percentage,
          m.tier,
+         m.user_a_id,
+         m.user_b_id,
+         m.user_a_unlocked,
+         m.user_b_unlocked,
          m.is_active,
          m.created_at,
          CASE WHEN m.user_a_id = $1 THEN m.user_a_unlocked
@@ -25,7 +29,7 @@ const getMatches = async (req, res) => {
       [userId]
     );
 
-    return res.json({ success: true, data: { matches: result.rows } });
+    return res.json({ success: true, data: { currentUserId: userId, matches: result.rows } });
   } catch (err) {
     console.error('Get matches error:', err);
     return res.status(500).json({ success: false, message: 'Failed to fetch matches.' });
