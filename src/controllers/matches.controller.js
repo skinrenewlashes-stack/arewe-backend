@@ -16,7 +16,10 @@ const getMatches = async (req, res) => {
          CASE WHEN m.user_a_id = $1 THEN m.submission_a_id
               ELSE m.submission_b_id END AS my_submission_id
        FROM matches m
-       WHERE (m.user_a_id = $1 OR m.user_b_id = $1)
+       WHERE (
+           (m.user_a_id = $1 AND COALESCE(m.hidden_by_user_a, FALSE) = FALSE)
+           OR (m.user_b_id = $1 AND COALESCE(m.hidden_by_user_b, FALSE) = FALSE)
+         )
          AND m.is_active = TRUE
        ORDER BY m.percentage DESC, m.created_at DESC`,
       [userId]
@@ -50,7 +53,10 @@ const getMatch = async (req, res) => {
               ELSE m.submission_b_id END AS my_submission_id
        FROM matches m
        WHERE m.id = $2
-         AND (m.user_a_id = $1 OR m.user_b_id = $1)
+         AND (
+           (m.user_a_id = $1 AND COALESCE(m.hidden_by_user_a, FALSE) = FALSE)
+           OR (m.user_b_id = $1 AND COALESCE(m.hidden_by_user_b, FALSE) = FALSE)
+         )
          AND m.is_active = TRUE`,
       [userId, matchId]
     );
@@ -83,4 +89,47 @@ const getMatch = async (req, res) => {
   }
 };
 
-module.exports = { getMatches, getMatch };
+const hideMatch = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const matchId = req.params.id;
+
+    const result = await pool.query(
+      `SELECT id, user_a_id, user_b_id
+       FROM matches
+       WHERE id = $1
+         AND is_active = TRUE`,
+      [matchId]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ success: false, message: 'Match not found.' });
+    }
+
+    const match = result.rows[0];
+    let hiddenColumn;
+
+    if (match.user_a_id === userId) {
+      hiddenColumn = 'hidden_by_user_a';
+    } else if (match.user_b_id === userId) {
+      hiddenColumn = 'hidden_by_user_b';
+    } else {
+      return res.status(403).json({ success: false, message: 'You do not have access to this match.' });
+    }
+
+    await pool.query(
+      `UPDATE matches
+       SET ${hiddenColumn} = TRUE,
+           updated_at = NOW()
+       WHERE id = $1`,
+      [matchId]
+    );
+
+    return res.json({ success: true, data: { matchId, hidden: true } });
+  } catch (err) {
+    console.error('Hide match error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to remove match.' });
+  }
+};
+
+module.exports = { getMatches, getMatch, hideMatch };
