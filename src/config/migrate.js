@@ -105,6 +105,8 @@ const migrate = async () => {
         user_b_unlocked BOOLEAN DEFAULT FALSE,
         user_a_unlocked_at TIMESTAMP,
         user_b_unlocked_at TIMESTAMP,
+        hidden_by_user_a BOOLEAN DEFAULT FALSE,
+        hidden_by_user_b BOOLEAN DEFAULT FALSE,
         is_active BOOLEAN DEFAULT TRUE,
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW(),
@@ -166,12 +168,16 @@ const migrate = async () => {
       ALTER TABLE payments ALTER COLUMN stripe_payment_intent_id DROP NOT NULL;
       ALTER TABLE payments ADD COLUMN IF NOT EXISTS google_purchase_token VARCHAR(255);
       ALTER TABLE payments ADD COLUMN IF NOT EXISTS google_order_id VARCHAR(255);
+      ALTER TABLE matches ADD COLUMN IF NOT EXISTS hidden_by_user_a BOOLEAN DEFAULT FALSE;
+      ALTER TABLE matches ADD COLUMN IF NOT EXISTS hidden_by_user_b BOOLEAN DEFAULT FALSE;
 
       CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
       CREATE INDEX IF NOT EXISTS idx_submissions_user_id ON submissions(user_id);
       CREATE INDEX IF NOT EXISTS idx_submissions_active ON submissions(is_active);
       CREATE INDEX IF NOT EXISTS idx_matches_user_a ON matches(user_a_id);
       CREATE INDEX IF NOT EXISTS idx_matches_user_b ON matches(user_b_id);
+      CREATE INDEX IF NOT EXISTS idx_matches_hidden_user_a ON matches(user_a_id, hidden_by_user_a);
+      CREATE INDEX IF NOT EXISTS idx_matches_hidden_user_b ON matches(user_b_id, hidden_by_user_b);
       CREATE INDEX IF NOT EXISTS idx_payments_user_match ON payments(user_id, match_id);
       CREATE INDEX IF NOT EXISTS idx_payments_intent ON payments(stripe_payment_intent_id);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_google_purchase_token
