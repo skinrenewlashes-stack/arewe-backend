@@ -136,7 +136,7 @@ const migrate = async () => {
         requester_id UUID REFERENCES users(id) ON DELETE CASCADE,
         recipient_id UUID REFERENCES users(id) ON DELETE CASCADE,
         status VARCHAR(30) NOT NULL DEFAULT 'pending'
-          CHECK (status IN ('pending','payment_required','accepted','declined','expired')),
+          CHECK (status IN ('pending','payment_required','accepted','denied','declined','expired')),
         expires_at TIMESTAMP NOT NULL DEFAULT (NOW() + INTERVAL '7 days'),
         requester_shared JSONB,
         recipient_shared JSONB,
@@ -170,6 +170,10 @@ const migrate = async () => {
       ALTER TABLE payments ADD COLUMN IF NOT EXISTS google_order_id VARCHAR(255);
       ALTER TABLE matches ADD COLUMN IF NOT EXISTS hidden_by_user_a BOOLEAN DEFAULT FALSE;
       ALTER TABLE matches ADD COLUMN IF NOT EXISTS hidden_by_user_b BOOLEAN DEFAULT FALSE;
+      ALTER TABLE connection_requests DROP CONSTRAINT IF EXISTS connection_requests_status_check;
+      ALTER TABLE connection_requests
+        ADD CONSTRAINT connection_requests_status_check
+        CHECK (status IN ('pending','payment_required','accepted','denied','declined','expired'));
 
       CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
       CREATE INDEX IF NOT EXISTS idx_submissions_user_id ON submissions(user_id);
