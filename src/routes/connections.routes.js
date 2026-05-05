@@ -7,7 +7,11 @@ const validate = require('../middleware/validate');
 
 router.post('/request',
   authenticate,
-  [body('matchId').notEmpty().withMessage('Match ID required')],
+  [
+    body('matchId').notEmpty().withMessage('Match ID required'),
+    body('contactMethod').isIn(['phone', 'email', 'social', 'other']).withMessage('Valid contact method required'),
+    body('contactDetail').trim().notEmpty().withMessage('Contact detail required'),
+  ],
   validate,
   ctrl.sendRequest
 );
@@ -17,7 +21,18 @@ router.get('/active', authenticate, ctrl.getActiveConnections);
 
 router.post('/:id/respond',
   authenticate,
-  [body('action').isIn(['accept', 'decline']).withMessage('Action must be accept or decline')],
+  [
+    body('action').isIn(['accept', 'decline']).withMessage('Action must be accept or decline'),
+    body('contactMethod')
+      .if(body('action').equals('accept'))
+      .isIn(['phone', 'email', 'social', 'other'])
+      .withMessage('Valid contact method required'),
+    body('contactDetail')
+      .if(body('action').equals('accept'))
+      .trim()
+      .notEmpty()
+      .withMessage('Contact detail required'),
+  ],
   validate,
   ctrl.respondToRequest
 );

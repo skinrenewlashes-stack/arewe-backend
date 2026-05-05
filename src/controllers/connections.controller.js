@@ -7,6 +7,19 @@ const {
   notifyContactExchange,
 } = require('../utils/notifications');
 
+const VALID_CONTACT_METHODS = ['phone', 'email', 'social', 'other'];
+
+const normalizeContact = ({ contactMethod, contactDetail } = {}) => {
+  const method = typeof contactMethod === 'string' ? contactMethod.trim() : '';
+  const detail = typeof contactDetail === 'string' ? contactDetail.trim() : '';
+
+  if (!VALID_CONTACT_METHODS.includes(method) || !detail) {
+    return null;
+  }
+
+  return { method, detail };
+};
+
 /**
  * User A sends a connection request after unlocking.
  * - Validates User A has paid for this match
@@ -17,10 +30,15 @@ const sendRequest = async (req, res) => {
   const client = await pool.connect();
   try {
     const requesterId = req.user.id;
-    const { matchId } = req.body;
+    const { matchId, contactMethod, contactDetail } = req.body;
 
     if (!matchId) {
       return res.status(400).json({ success: false, message: 'Match ID is required.' });
+    }
+
+    const requesterContact = normalizeContact({ contactMethod, contactDetail });
+    if (!requesterContact) {
+      return res.status(400).json({ success: false, message: 'Contact method and detail are required.' });
     }
 
     // Verify match and requester participation
@@ -76,10 +94,10 @@ const sendRequest = async (req, res) => {
 
     const reqResult = await client.query(
       `INSERT INTO connection_requests
-         (match_id, requester_id, recipient_id, status, expires_at)
-       VALUES ($1,$2,$3,$4, NOW() + INTERVAL '7 days')
+         (match_id, requester_id, recipient_id, status, expires_at, requester_shared)
+       VALUES ($1,$2,$3,$4, NOW() + INTERVAL '7 days', $5)
        RETURNING *`,
-      [matchId, requesterId, recipientId, initialStatus]
+      [matchId, requesterId, recipientId, initialStatus, JSON.stringify(requesterContact)]
     );
 
     const request = reqResult.rows[0];
@@ -122,6 +140,8 @@ const getRequests = async (req, res) => {
          cr.expires_at,
          cr.exchange_completed,
          cr.created_at,
+         cr.requester_shared,
+         cr.recipient_shared,
          m.percentage AS match_percentage,
          CASE WHEN cr.requester_id = $1 THEN 'outgoing' ELSE 'incoming' END AS direction
        FROM connection_requests cr
@@ -150,17 +170,25 @@ const getRequests = async (req, res) => {
  * User B responds to a connection request (accept or decline).
  * - Validates recipient identity and payment
  * - On accept: updates status to 'accepted', notifies requester
- * - On decline: updates status to 'declined', notifies requester
+ * - On decline: updates status to 'denied', notifies requester
  */
 const respondToRequest = async (req, res) => {
   const client = await pool.connect();
   try {
     const userId = req.user.id;
     const requestId = req.params.id;
-    const { action } = req.body;
+    const { action, contactMethod, contactDetail } = req.body;
 
     if (!['accept', 'decline'].includes(action)) {
       return res.status(400).json({ success: false, message: 'Action must be accept or decline.' });
+    }
+
+    const recipientContact = action === 'accept'
+      ? normalizeContact({ contactMethod, contactDetail })
+      : null;
+
+    if (action === 'accept' && !recipientContact) {
+      return res.status(400).json({ success: false, message: 'Contact method and detail are required.' });
     }
 
     const reqResult = await client.query(
@@ -180,7 +208,7 @@ const respondToRequest = async (req, res) => {
     if (request.status === 'expired') {
       return res.status(400).json({ success: false, message: 'This request has expired.' });
     }
-    if (request.status === 'accepted' || request.status === 'declined') {
+    if (request.status === 'accepted' || request.status === 'denied' || request.status === 'declined') {
       return res.status(400).json({ success: false, message: 'Request already responded to.' });
     }
     if (request.status === 'payment_required') {
@@ -202,24 +230,39 @@ const respondToRequest = async (req, res) => {
 
     await client.query('BEGIN');
 
-    const newStatus = action === 'accept' ? 'accepted' : 'declined';
+    const newStatus = action === 'accept' ? 'accepted' : 'denied';
 
-    await client.query(
-      `UPDATE connection_requests SET status = $1, updated_at = NOW() WHERE id = $2`,
-      [newStatus, requestId]
-    );
+    if (newStatus === 'accepted') {
+      await client.query(
+        `UPDATE connection_requests
+         SET status = $1,
+             recipient_shared = $2,
+             exchange_completed = TRUE,
+             exchange_completed_at = NOW(),
+             updated_at = NOW()
+         WHERE id = $3`,
+        [newStatus, JSON.stringify(recipientContact), requestId]
+      );
+    } else {
+      await client.query(
+        `UPDATE connection_requests SET status = $1, updated_at = NOW() WHERE id = $2`,
+        [newStatus, requestId]
+      );
+    }
 
     await client.query('COMMIT');
 
     if (newStatus === 'accepted') {
       notifyRequestAccepted(request.requester_id).catch(() => {});
+      notifyContactExchange(request.requester_id).catch(() => {});
+      notifyContactExchange(request.recipient_id).catch(() => {});
     } else {
       notifyRequestDeclined(request.requester_id).catch(() => {});
     }
 
     return res.json({
       success: true,
-      message: newStatus === 'accepted' ? 'Request accepted.' : 'Request declined.',
+      message: newStatus === 'accepted' ? 'Request accepted.' : 'Request denied.',
       data: { status: newStatus, requestId },
     });
   } catch (err) {
@@ -327,6 +370,7 @@ const getActiveConnections = async (req, res) => {
     const result = await pool.query(
       `SELECT cr.id, cr.exchange_completed, cr.exchange_completed_at,
               cr.requester_shared, cr.recipient_shared, cr.created_at,
+              cr.requester_id, cr.recipient_id,
               m.percentage AS match_percentage,
               CASE WHEN cr.requester_id = $1 THEN 'outgoing' ELSE 'incoming' END AS direction
        FROM connection_requests cr
@@ -336,7 +380,7 @@ const getActiveConnections = async (req, res) => {
        ORDER BY cr.updated_at DESC`,
       [userId]
     );
-    return res.json({ success: true, data: { connections: result.rows } });
+    return res.json({ success: true, data: { currentUserId: userId, connections: result.rows } });
   } catch (err) {
     console.error('Get active connections error:', err);
     return res.status(500).json({ success: false, message: 'Failed to fetch connections.' });
