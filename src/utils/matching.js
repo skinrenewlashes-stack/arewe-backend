@@ -11,8 +11,8 @@
  *   car_model        5%
  *
  * Rules:
- * - Only score fields that are present in BOTH submissions
- * - Normalize final score to 0-100 based on available weight
+ * - Missing fields contribute 0 points
+ * - Normalize final score to 0-100 based on the full weight total
  * - Return per-category breakdown: 'match' | 'partial' | 'none'
  */
 
@@ -69,7 +69,7 @@ function scoreFirstName(a, b) {
   const normalizedB = normalizeString(b);
   const na = normalize(a);
   const nb = normalize(b);
-  if (normalizedA === normalizedB) return { score: 1, status: 'exact' };
+  if (normalizedA === normalizedB) return { score: 1, status: 'match' };
   if (isNameMatch(a, b)) return { score: 0.5, status: 'partial' };
   if (na.startsWith(nb) || nb.startsWith(na)) return { score: 0.5, status: 'partial' };
   return { score: 0, status: 'none' };
@@ -163,17 +163,16 @@ function computeMatch(subA, subB) {
     carModel: scoreCarModel(subA.car_model, subB.car_model),
   };
 
-  let totalWeight = 0;
+  const totalWeight = Object.values(WEIGHTS).reduce((sum, weight) => sum + weight, 0);
   let earnedScore = 0;
   const breakdown = {};
 
   for (const [field, result] of Object.entries(scores)) {
+    const weight = WEIGHTS[field];
     if (result === null) {
       breakdown[field] = 'none';
       continue;
     }
-    const weight = WEIGHTS[field];
-    totalWeight += weight;
     earnedScore += result.score * weight;
     breakdown[field] = result.status;
   }
