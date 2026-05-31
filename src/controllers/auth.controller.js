@@ -289,11 +289,17 @@ const resetPasswordRedirect = (req, res) => {
       </head>
       <body style="margin:0;background:#050505;color:#f5f5f5;font-family:Arial,Helvetica,sans-serif;">
         <main style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;">
-          <section style="max-width:520px;width:100%;background:#0d0d0d;border:1px solid #2a2415;border-radius:12px;padding:36px 28px;text-align:center;">
+          <section style="max-width:520px;width:100%;background:#0d0d0d;border:1px solid #2a2415;border-radius:12px;padding:40px 28px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.45);">
             <div style="color:#D4AF37;font-size:28px;font-weight:700;margin-bottom:8px;">AreWe?</div>
-            <h1 style="margin:0 0 16px;color:#ffffff;font-size:26px;line-height:1.25;">Opening the app</h1>
-            <p style="margin:0 0 20px;color:#d8d8d8;font-size:16px;line-height:1.6;">
-              If the app does not open, copy this link:
+            <h1 style="margin:0 0 14px;color:#ffffff;font-size:26px;line-height:1.25;">Opening the app</h1>
+            <p style="margin:0 0 24px;color:#d8d8d8;font-size:16px;line-height:1.6;">
+              If the app does not open automatically, tap the button below.
+            </p>
+            <a href="${appLink}" style="display:block;width:100%;box-sizing:border-box;background:#D4AF37;color:#050505;text-decoration:none;font-size:18px;font-weight:700;line-height:1.2;border-radius:8px;padding:17px 20px;margin:0 0 24px;">
+              Open AreWe app
+            </a>
+            <p style="margin:0 0 8px;color:#a9a9a9;font-size:13px;line-height:1.5;">
+              Backup deep link:
             </p>
             <p style="margin:0;color:#D4AF37;font-size:14px;line-height:1.6;word-break:break-all;">
               ${appLink}
@@ -301,7 +307,10 @@ const resetPasswordRedirect = (req, res) => {
           </section>
         </main>
         <script>
-          window.location.href = ${JSON.stringify(appLink)};
+          (function () {
+            var appLink = ${JSON.stringify(appLink)};
+            window.location.href = appLink;
+          }());
         </script>
       </body>
     </html>
