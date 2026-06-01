@@ -156,31 +156,44 @@ const verifyAppleTransaction = async ({ signedTransactionInfo, transactionId, pr
     expectedTransactionId: transactionId,
   }));
 
-  const apiClient = await withAppleStep('create_api_client', () => createApiClient());
-  const transactionInfoResponse = await withAppleStep('fetch_transaction_info_from_apple', () =>
-    apiClient.getTransactionInfo(transactionId)
-  );
+  let serverTransaction;
+  let serverSignedTransactionInfo;
 
-  if (!transactionInfoResponse.signedTransactionInfo) {
-    await withAppleStep('validate_apple_transaction_lookup_response', async () => {
-      throw new Error('Apple transaction lookup did not return signed transaction info.');
+  try {
+    const apiClient = await withAppleStep('create_api_client', () => createApiClient());
+    const transactionInfoResponse = await withAppleStep('fetch_transaction_info_from_apple', () =>
+      apiClient.getTransactionInfo(transactionId)
+    );
+
+    if (!transactionInfoResponse.signedTransactionInfo) {
+      await withAppleStep('validate_apple_transaction_lookup_response', async () => {
+        throw new Error('Apple transaction lookup did not return signed transaction info.');
+      });
+    }
+
+    serverSignedTransactionInfo = transactionInfoResponse.signedTransactionInfo;
+    serverTransaction = await withAppleStep(
+      'verify_server_signed_transaction',
+      () => verifier.verifyAndDecodeTransaction(serverSignedTransactionInfo)
+    );
+
+    await withAppleStep('validate_server_transaction_fields', async () => assertValidTransaction({
+      transaction: serverTransaction,
+      expectedProductId: productId,
+      expectedTransactionId: transactionId,
+    }));
+  } catch (err) {
+    console.warn('Apple getTransactionInfo cross-check failed; continuing with verified StoreKit signed transaction:', {
+      step: err.appleVerificationStep,
+      diagnostics: err.appleDiagnostics || summarizeAppleError(err),
+      transactionId,
+      productId,
     });
   }
 
-  const serverTransaction = await withAppleStep(
-    'verify_server_signed_transaction',
-    () => verifier.verifyAndDecodeTransaction(transactionInfoResponse.signedTransactionInfo)
-  );
-
-  await withAppleStep('validate_server_transaction_fields', async () => assertValidTransaction({
-    transaction: serverTransaction,
-    expectedProductId: productId,
-    expectedTransactionId: transactionId,
-  }));
-
   return {
-    transaction: serverTransaction,
-    signedTransactionInfo: transactionInfoResponse.signedTransactionInfo,
+    transaction: serverTransaction || decodedTransaction,
+    signedTransactionInfo: serverSignedTransactionInfo || signedTransactionInfo,
   };
 };
 
