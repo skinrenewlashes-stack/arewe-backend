@@ -5,6 +5,7 @@ const {
   consumeGooglePlayProductPurchase,
   verifyGooglePlayProductPurchase,
 } = require('../utils/googlePlay');
+const { verifyAppleTransaction } = require('../utils/appleStore');
 
 /**
  * Create a Stripe PaymentIntent for a user to unlock a match.
@@ -466,6 +467,243 @@ const verifyGooglePlayPurchase = async (req, res) => {
   }
 };
 
+const verifyApplePurchase = async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const userId = req.user.id;
+    const {
+      matchId,
+      productId,
+      transactionId,
+      originalTransactionId,
+      signedTransactionInfo,
+      purchaseToken,
+    } = req.body;
+    const appleSignedTransactionInfo = signedTransactionInfo || purchaseToken;
+    const expectedProductId = process.env.APPLE_PRODUCT_ID || 'match_unlock_499';
+
+    if (!matchId || !productId || !transactionId || !appleSignedTransactionInfo) {
+      return res.status(400).json({
+        success: false,
+        message: 'Match ID, product ID, transaction ID, and signed transaction info are required.',
+      });
+    }
+
+    if (productId !== expectedProductId) {
+      return res.status(400).json({ success: false, message: 'Invalid product ID.' });
+    }
+
+    const matchResult = await client.query(
+      `SELECT id, user_a_id, user_b_id, user_a_unlocked, user_b_unlocked
+       FROM matches WHERE id = $1 AND is_active = TRUE`,
+      [matchId]
+    );
+
+    if (!matchResult.rows.length) {
+      return res.status(404).json({ success: false, message: 'Match not found.' });
+    }
+
+    const match = matchResult.rows[0];
+    const isUserA = match.user_a_id === userId;
+    const isUserB = match.user_b_id === userId;
+
+    if (!isUserA && !isUserB) {
+      return res.status(403).json({ success: false, message: 'Access denied.' });
+    }
+
+    const existingPurchase = await client.query(
+      `SELECT user_id, match_id FROM payments WHERE apple_transaction_id = $1`,
+      [transactionId]
+    );
+
+    if (existingPurchase.rows.length > 0) {
+      console.warn('Apple transaction reuse rejected:', {
+        userId,
+        matchId,
+        productId,
+        transactionId,
+      });
+      return res.status(409).json({
+        success: false,
+        message: 'Transaction has already been used.',
+      });
+    }
+
+    let verificationResult;
+
+    try {
+      verificationResult = await verifyAppleTransaction({
+        signedTransactionInfo: appleSignedTransactionInfo,
+        transactionId,
+        productId,
+      });
+    } catch (err) {
+      console.error('Apple verification failed before unlock:', {
+        message: err.message,
+        productId,
+        matchId,
+        userId,
+        transactionId,
+      });
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid or not completed purchase',
+      });
+    }
+
+    const verifiedTransaction = verificationResult.transaction;
+    const verifiedOriginalTransactionId =
+      verifiedTransaction.originalTransactionId || originalTransactionId || transactionId;
+
+    console.log('Apple purchase verified:', {
+      productId,
+      matchId,
+      userId,
+      transactionId,
+      environment: verifiedTransaction.environment,
+    });
+
+    const alreadyUnlocked = isUserA ? match.user_a_unlocked : match.user_b_unlocked;
+    if (alreadyUnlocked) {
+      const existingMatchPayment = await client.query(
+        `SELECT id FROM payments WHERE user_id = $1 AND match_id = $2`,
+        [userId, matchId]
+      );
+
+      if (existingMatchPayment.rows.length) {
+        await client.query(
+          `UPDATE payments
+           SET apple_transaction_id = $1,
+               apple_original_transaction_id = $2,
+               apple_signed_transaction_info = $3,
+               apple_environment = $4,
+               status = 'succeeded',
+               updated_at = NOW()
+           WHERE user_id = $5 AND match_id = $6`,
+          [
+            transactionId,
+            verifiedOriginalTransactionId,
+            verificationResult.signedTransactionInfo,
+            verifiedTransaction.environment,
+            userId,
+            matchId,
+          ]
+        );
+      } else {
+        await client.query(
+          `INSERT INTO payments
+             (user_id, match_id, apple_transaction_id, apple_original_transaction_id, apple_signed_transaction_info, apple_environment, amount_cents, status)
+           VALUES ($1, $2, $3, $4, $5, $6, 499, 'succeeded')
+           ON CONFLICT DO NOTHING`,
+          [
+            userId,
+            matchId,
+            transactionId,
+            verifiedOriginalTransactionId,
+            verificationResult.signedTransactionInfo,
+            verifiedTransaction.environment,
+          ]
+        );
+      }
+
+      return res.json({
+        success: true,
+        message: 'Match already unlocked.',
+        data: { matchId, unlocked: true },
+      });
+    }
+
+    const existingMatchPayment = await client.query(
+      `SELECT id FROM payments WHERE user_id = $1 AND match_id = $2`,
+      [userId, matchId]
+    );
+
+    await client.query('BEGIN');
+
+    if (existingMatchPayment.rows.length) {
+      await client.query(
+        `UPDATE payments
+         SET apple_transaction_id = $1,
+             apple_original_transaction_id = $2,
+             apple_signed_transaction_info = $3,
+             apple_environment = $4,
+             status = 'succeeded',
+             updated_at = NOW()
+         WHERE user_id = $5 AND match_id = $6`,
+        [
+          transactionId,
+          verifiedOriginalTransactionId,
+          verificationResult.signedTransactionInfo,
+          verifiedTransaction.environment,
+          userId,
+          matchId,
+        ]
+      );
+    } else {
+      await client.query(
+        `INSERT INTO payments
+           (user_id, match_id, apple_transaction_id, apple_original_transaction_id, apple_signed_transaction_info, apple_environment, amount_cents, status)
+         VALUES ($1, $2, $3, $4, $5, $6, 499, 'succeeded')
+         ON CONFLICT DO NOTHING`,
+        [
+          userId,
+          matchId,
+          transactionId,
+          verifiedOriginalTransactionId,
+          verificationResult.signedTransactionInfo,
+          verifiedTransaction.environment,
+        ]
+      );
+    }
+
+    const unlockCol = isUserA ? 'user_a_unlocked' : 'user_b_unlocked';
+    const unlockAtCol = isUserA ? 'user_a_unlocked_at' : 'user_b_unlocked_at';
+
+    await client.query(
+      `UPDATE matches
+       SET ${unlockCol} = TRUE, ${unlockAtCol} = NOW(), updated_at = NOW()
+       WHERE id = $1`,
+      [matchId]
+    );
+
+    const reqResult = await client.query(
+      `SELECT id FROM connection_requests
+       WHERE match_id = $1 AND recipient_id = $2 AND status = 'payment_required'`,
+      [matchId, userId]
+    );
+
+    if (reqResult.rows.length > 0) {
+      await client.query(
+        `UPDATE connection_requests SET status = 'pending', updated_at = NOW()
+         WHERE id = $1`,
+        [reqResult.rows[0].id]
+      );
+    }
+
+    await client.query('COMMIT');
+
+    return res.json({
+      success: true,
+      message: 'Payment confirmed. Match unlocked.',
+      data: { matchId, unlocked: true },
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+
+    if (err.code === '23505') {
+      return res.status(409).json({
+        success: false,
+        message: 'Transaction has already been used.',
+      });
+    }
+
+    console.error('Apple verify error:', err);
+    return res.status(500).json({ success: false, message: 'Payment confirmation failed.' });
+  } finally {
+    client.release();
+  }
+};
+
 /**
  * Stripe webhook handler
  * Handles payment_intent.succeeded and payment_intent.payment_failed events
@@ -561,5 +799,6 @@ module.exports = {
   createPaymentIntent,
   confirmPayment,
   verifyGooglePlayPurchase,
+  verifyApplePurchase,
   stripeWebhook,
 };

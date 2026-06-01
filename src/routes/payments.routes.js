@@ -37,4 +37,22 @@ router.post('/google-play/verify',
   ctrl.verifyGooglePlayPurchase
 );
 
+router.post('/apple/verify',
+  authenticate,
+  [
+    body('matchId').notEmpty().withMessage('Match ID required'),
+    body('productId').notEmpty().withMessage('Product ID required'),
+    body('transactionId').notEmpty().withMessage('Transaction ID required'),
+    body('signedTransactionInfo').custom((value, { req }) => {
+      if (!value && !req.body.purchaseToken) {
+        throw new Error('Signed transaction info required');
+      }
+
+      return true;
+    }),
+  ],
+  validate,
+  ctrl.verifyApplePurchase
+);
+
 module.exports = router;
