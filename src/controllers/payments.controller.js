@@ -5,7 +5,7 @@ const {
   consumeGooglePlayProductPurchase,
   verifyGooglePlayProductPurchase,
 } = require('../utils/googlePlay');
-const { verifyAppleTransaction } = require('../utils/appleStore');
+const { summarizeAppleError, verifyAppleTransaction } = require('../utils/appleStore');
 
 /**
  * Create a Stripe PaymentIntent for a user to unlock a match.
@@ -538,8 +538,15 @@ const verifyApplePurchase = async (req, res) => {
         productId,
       });
     } catch (err) {
+      const appleDiagnostics = err.appleDiagnostics || summarizeAppleError(err);
       console.error('Apple verification failed before unlock:', {
+        step: err.appleVerificationStep,
+        errorName: err.name,
         message: err.message,
+        code: err.code,
+        statusCode: err.statusCode || err.response?.status,
+        stack: err.stack ? err.stack.split('\n').slice(0, 6).join('\n') : undefined,
+        appleDiagnostics,
         productId,
         matchId,
         userId,

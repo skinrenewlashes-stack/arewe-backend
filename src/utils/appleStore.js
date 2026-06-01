@@ -71,6 +71,51 @@ const createApiClient = () => new AppStoreServerAPIClient(
   getAppleEnvironment()
 );
 
+const getStackPreview = (err) => {
+  if (!err?.stack) {
+    return undefined;
+  }
+
+  return err.stack.split('\n').slice(0, 6).join('\n');
+};
+
+const summarizeAppleError = (err) => {
+  const cause = err?.cause;
+
+  return {
+    name: err?.name,
+    message: err?.message,
+    code: err?.code,
+    status: err?.status,
+    statusCode: err?.statusCode || err?.response?.status,
+    stack: getStackPreview(err),
+    cause: cause ? {
+      name: cause.name,
+      message: cause.message,
+      code: cause.code,
+      status: cause.status,
+      statusCode: cause.statusCode || cause.response?.status,
+      stack: getStackPreview(cause),
+    } : undefined,
+    appleResponse: {
+      body: err?.responseBody || err?.response?.body || err?.body,
+      data: err?.response?.data,
+      errorCode: err?.apiError,
+      errorMessage: err?.apiErrorMessage,
+    },
+  };
+};
+
+const withAppleStep = async (step, fn) => {
+  try {
+    return await fn();
+  } catch (err) {
+    err.appleVerificationStep = step;
+    err.appleDiagnostics = summarizeAppleError(err);
+    throw err;
+  }
+};
+
 const assertValidTransaction = ({ transaction, expectedProductId, expectedTransactionId }) => {
   const expectedBundleId = getRequiredEnv('APPLE_BUNDLE_ID');
 
@@ -100,31 +145,38 @@ const verifyAppleTransaction = async ({ signedTransactionInfo, transactionId, pr
     throw new Error('signedTransactionInfo, transactionId, and productId are required.');
   }
 
-  const verifier = createVerifier();
-  const decodedTransaction = await verifier.verifyAndDecodeTransaction(signedTransactionInfo);
+  const verifier = await withAppleStep('create_verifier', () => createVerifier());
+  const decodedTransaction = await withAppleStep('verify_client_signed_transaction', () =>
+    verifier.verifyAndDecodeTransaction(signedTransactionInfo)
+  );
 
-  assertValidTransaction({
+  await withAppleStep('validate_client_transaction_fields', async () => assertValidTransaction({
     transaction: decodedTransaction,
     expectedProductId: productId,
     expectedTransactionId: transactionId,
-  });
+  }));
 
-  const apiClient = createApiClient();
-  const transactionInfoResponse = await apiClient.getTransactionInfo(transactionId);
-
-  if (!transactionInfoResponse.signedTransactionInfo) {
-    throw new Error('Apple transaction lookup did not return signed transaction info.');
-  }
-
-  const serverTransaction = await verifier.verifyAndDecodeTransaction(
-    transactionInfoResponse.signedTransactionInfo
+  const apiClient = await withAppleStep('create_api_client', () => createApiClient());
+  const transactionInfoResponse = await withAppleStep('fetch_transaction_info_from_apple', () =>
+    apiClient.getTransactionInfo(transactionId)
   );
 
-  assertValidTransaction({
+  if (!transactionInfoResponse.signedTransactionInfo) {
+    await withAppleStep('validate_apple_transaction_lookup_response', async () => {
+      throw new Error('Apple transaction lookup did not return signed transaction info.');
+    });
+  }
+
+  const serverTransaction = await withAppleStep(
+    'verify_server_signed_transaction',
+    () => verifier.verifyAndDecodeTransaction(transactionInfoResponse.signedTransactionInfo)
+  );
+
+  await withAppleStep('validate_server_transaction_fields', async () => assertValidTransaction({
     transaction: serverTransaction,
     expectedProductId: productId,
     expectedTransactionId: transactionId,
-  });
+  }));
 
   return {
     transaction: serverTransaction,
@@ -133,5 +185,6 @@ const verifyAppleTransaction = async ({ signedTransactionInfo, transactionId, pr
 };
 
 module.exports = {
+  summarizeAppleError,
   verifyAppleTransaction,
 };
