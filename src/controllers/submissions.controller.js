@@ -43,8 +43,10 @@ const createSubmission = async (req, res) => {
     // Run matching against all active submissions from OTHER users
     const otherSubs = await client.query(
       `SELECT s.* FROM submissions s
+       JOIN users u ON u.id = s.user_id
        WHERE s.user_id != $1
          AND s.is_active = TRUE
+         AND u.is_active = TRUE
          AND s.user_id NOT IN (
            SELECT blocked_id FROM blocked_users WHERE blocker_id = $1
            UNION

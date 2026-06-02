@@ -20,11 +20,21 @@ const getMatches = async (req, res) => {
          CASE WHEN m.user_a_id = $1 THEN m.submission_a_id
               ELSE m.submission_b_id END AS my_submission_id
        FROM matches m
+       JOIN submissions sa ON sa.id = m.submission_a_id
+       JOIN submissions sb ON sb.id = m.submission_b_id
+       JOIN users ua ON ua.id = m.user_a_id
+       JOIN users ub ON ub.id = m.user_b_id
        WHERE (
-           (m.user_a_id = $1 AND COALESCE(m.hidden_by_user_a, FALSE) = FALSE)
-           OR (m.user_b_id = $1 AND COALESCE(m.hidden_by_user_b, FALSE) = FALSE)
+           (m.user_a_id = $1 AND sa.user_id = $1 AND COALESCE(m.hidden_by_user_a, FALSE) = FALSE)
+           OR (m.user_b_id = $1 AND sb.user_id = $1 AND COALESCE(m.hidden_by_user_b, FALSE) = FALSE)
          )
          AND m.is_active = TRUE
+         AND sa.is_active = TRUE
+         AND sb.is_active = TRUE
+         AND ua.is_active = TRUE
+         AND ub.is_active = TRUE
+         AND m.user_a_id = sa.user_id
+         AND m.user_b_id = sb.user_id
        ORDER BY m.percentage DESC, m.created_at DESC`,
       [userId]
     );
@@ -56,12 +66,22 @@ const getMatch = async (req, res) => {
          CASE WHEN m.user_a_id = $1 THEN m.submission_a_id
               ELSE m.submission_b_id END AS my_submission_id
        FROM matches m
+       JOIN submissions sa ON sa.id = m.submission_a_id
+       JOIN submissions sb ON sb.id = m.submission_b_id
+       JOIN users ua ON ua.id = m.user_a_id
+       JOIN users ub ON ub.id = m.user_b_id
        WHERE m.id = $2
          AND (
-           (m.user_a_id = $1 AND COALESCE(m.hidden_by_user_a, FALSE) = FALSE)
-           OR (m.user_b_id = $1 AND COALESCE(m.hidden_by_user_b, FALSE) = FALSE)
+           (m.user_a_id = $1 AND sa.user_id = $1 AND COALESCE(m.hidden_by_user_a, FALSE) = FALSE)
+           OR (m.user_b_id = $1 AND sb.user_id = $1 AND COALESCE(m.hidden_by_user_b, FALSE) = FALSE)
          )
-         AND m.is_active = TRUE`,
+         AND m.is_active = TRUE
+         AND sa.is_active = TRUE
+         AND sb.is_active = TRUE
+         AND ua.is_active = TRUE
+         AND ub.is_active = TRUE
+         AND m.user_a_id = sa.user_id
+         AND m.user_b_id = sb.user_id`,
       [userId, matchId]
     );
 
