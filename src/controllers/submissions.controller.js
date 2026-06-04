@@ -2,6 +2,26 @@ const pool = require('../config/db');
 const { computeMatch } = require('../utils/matching');
 const { notifyNewMatch } = require('../utils/notifications');
 
+const getSubmissionPairKey = (submissionAId, submissionBId) =>
+  [submissionAId, submissionBId].map(String).sort().join(':');
+
+const normalizeText = (value) => value.trim();
+const normalizeOptionalText = (value) => value?.trim() || null;
+const normalizeLifestyleHabits = (value) =>
+  value && value.length > 0 ? [...value].map(String).sort() : [];
+const getSubmissionIdentityKey = (userId, submission) =>
+  [
+    userId,
+    submission.firstName.toLowerCase(),
+    submission.ageRange,
+    submission.city.toLowerCase(),
+    submission.stateProvince.toLowerCase(),
+    submission.race,
+    (submission.industry || '').toLowerCase(),
+    (submission.carModel || '').toLowerCase(),
+    submission.lifestyleHabits.join('|'),
+  ].join(':');
+
 const createSubmission = async (req, res) => {
   const client = await pool.connect();
   try {
@@ -17,8 +37,70 @@ const createSubmission = async (req, res) => {
     } = req.body;
 
     const userId = req.user.id;
+    const normalizedFirstName = normalizeText(firstName);
+    const normalizedCity = normalizeText(city);
+    const normalizedStateProvince = normalizeText(stateProvince);
+    const normalizedIndustry = normalizeOptionalText(industry);
+    const normalizedCarModel = normalizeOptionalText(carModel);
+    const normalizedLifestyleHabits = normalizeLifestyleHabits(lifestyleHabits);
+    const storedLifestyleHabits = normalizedLifestyleHabits.length > 0 ? normalizedLifestyleHabits : null;
+    const submissionIdentityKey = getSubmissionIdentityKey(userId, {
+      firstName: normalizedFirstName,
+      ageRange,
+      city: normalizedCity,
+      stateProvince: normalizedStateProvince,
+      race,
+      industry: normalizedIndustry,
+      carModel: normalizedCarModel,
+      lifestyleHabits: normalizedLifestyleHabits,
+    });
 
     await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [submissionIdentityKey]);
+
+    const duplicateSubmission = await client.query(
+      `SELECT *
+       FROM submissions s
+       WHERE s.user_id = $1
+         AND s.is_active = TRUE
+         AND LOWER(TRIM(s.first_name)) = LOWER($2)
+         AND s.age_range = $3
+         AND LOWER(TRIM(s.city)) = LOWER($4)
+         AND LOWER(TRIM(s.state_province)) = LOWER($5)
+         AND s.race = $6
+         AND COALESCE(LOWER(TRIM(s.industry)), '') = LOWER(COALESCE($7, ''))
+         AND COALESCE(LOWER(TRIM(s.car_model)), '') = LOWER(COALESCE($8, ''))
+         AND COALESCE(
+           (SELECT ARRAY_AGG(item ORDER BY item) FROM UNNEST(s.lifestyle_habits) AS habit(item)),
+           ARRAY[]::text[]
+         ) = $9::text[]
+       ORDER BY s.created_at DESC
+       LIMIT 1`,
+      [
+        userId,
+        normalizedFirstName,
+        ageRange,
+        normalizedCity,
+        normalizedStateProvince,
+        race,
+        normalizedIndustry,
+        normalizedCarModel,
+        normalizedLifestyleHabits,
+      ]
+    );
+
+    if (duplicateSubmission.rows.length > 0) {
+      await client.query('COMMIT');
+      return res.status(200).json({
+        success: true,
+        message: 'Submission already exists.',
+        data: {
+          submission: duplicateSubmission.rows[0],
+          matchesFound: 0,
+          topMatch: null,
+        },
+      });
+    }
 
     const subResult = await client.query(
       `INSERT INTO submissions
@@ -27,14 +109,14 @@ const createSubmission = async (req, res) => {
        RETURNING *`,
       [
         userId,
-        firstName.trim(),
+        normalizedFirstName,
         ageRange,
-        city.trim(),
-        stateProvince.trim(),
+        normalizedCity,
+        normalizedStateProvince,
         race,
-        industry?.trim() || null,
-        carModel?.trim() || null,
-        lifestyleHabits && lifestyleHabits.length > 0 ? lifestyleHabits : null,
+        normalizedIndustry,
+        normalizedCarModel,
+        storedLifestyleHabits,
       ]
     );
 
@@ -58,6 +140,10 @@ const createSubmission = async (req, res) => {
     const newMatches = [];
 
     for (const otherSub of otherSubs.rows) {
+      const pairKey = getSubmissionPairKey(newSub.id, otherSub.id);
+
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [pairKey]);
+
       // Skip if a match already exists between these two submissions
       const existing = await client.query(
         `SELECT id FROM matches
@@ -77,6 +163,7 @@ const createSubmission = async (req, res) => {
            (submission_a_id, submission_b_id, user_a_id, user_b_id,
             percentage, tier, breakdown)
          VALUES ($1,$2,$3,$4,$5,$6,$7)
+         ON CONFLICT (submission_a_id, submission_b_id) DO NOTHING
          RETURNING id, percentage, tier`,
         [
           newSub.id,
@@ -88,6 +175,8 @@ const createSubmission = async (req, res) => {
           JSON.stringify(breakdown),
         ]
       );
+
+      if (!matchResult.rows.length) continue;
 
       newMatches.push(matchResult.rows[0]);
 

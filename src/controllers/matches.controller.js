@@ -5,37 +5,66 @@ const getMatches = async (req, res) => {
     const userId = req.user.id;
 
     const result = await pool.query(
-      `SELECT
-         m.id,
-         m.percentage,
-         m.tier,
-         m.user_a_id,
-         m.user_b_id,
-         m.user_a_unlocked,
-         m.user_b_unlocked,
-         m.is_active,
-         m.created_at,
-         CASE WHEN m.user_a_id = $1 THEN m.user_a_unlocked
-              ELSE m.user_b_unlocked END AS is_unlocked,
-         CASE WHEN m.user_a_id = $1 THEN m.submission_a_id
-              ELSE m.submission_b_id END AS my_submission_id
-       FROM matches m
-       JOIN submissions sa ON sa.id = m.submission_a_id
-       JOIN submissions sb ON sb.id = m.submission_b_id
-       JOIN users ua ON ua.id = m.user_a_id
-       JOIN users ub ON ub.id = m.user_b_id
-       WHERE (
-           (m.user_a_id = $1 AND sa.user_id = $1 AND COALESCE(m.hidden_by_user_a, FALSE) = FALSE)
-           OR (m.user_b_id = $1 AND sb.user_id = $1 AND COALESCE(m.hidden_by_user_b, FALSE) = FALSE)
-         )
-         AND m.is_active = TRUE
-         AND sa.is_active = TRUE
-         AND sb.is_active = TRUE
-         AND ua.is_active = TRUE
-         AND ub.is_active = TRUE
-         AND m.user_a_id = sa.user_id
-         AND m.user_b_id = sb.user_id
-       ORDER BY m.percentage DESC, m.created_at DESC`,
+      `WITH visible_matches AS (
+         SELECT
+           m.id,
+           m.percentage,
+           m.tier,
+           m.submission_a_id,
+           m.submission_b_id,
+           m.user_a_id,
+           m.user_b_id,
+           m.user_a_unlocked,
+           m.user_b_unlocked,
+           m.is_active,
+           m.created_at,
+           LEAST(m.submission_a_id::text, m.submission_b_id::text) AS pair_low,
+           GREATEST(m.submission_a_id::text, m.submission_b_id::text) AS pair_high,
+           CASE WHEN m.user_a_id = $1 THEN m.user_a_unlocked
+                ELSE m.user_b_unlocked END AS is_unlocked,
+           CASE WHEN m.user_a_id = $1 THEN m.submission_a_id
+                ELSE m.submission_b_id END AS my_submission_id,
+           CASE WHEN m.user_a_id = $1 THEN m.submission_b_id
+                ELSE m.submission_a_id END AS other_submission_id
+         FROM matches m
+         JOIN submissions sa ON sa.id = m.submission_a_id
+         JOIN submissions sb ON sb.id = m.submission_b_id
+         JOIN users ua ON ua.id = m.user_a_id
+         JOIN users ub ON ub.id = m.user_b_id
+         WHERE (
+             (m.user_a_id = $1 AND sa.user_id = $1 AND COALESCE(m.hidden_by_user_a, FALSE) = FALSE)
+             OR (m.user_b_id = $1 AND sb.user_id = $1 AND COALESCE(m.hidden_by_user_b, FALSE) = FALSE)
+           )
+           AND m.is_active = TRUE
+           AND sa.is_active = TRUE
+           AND sb.is_active = TRUE
+           AND ua.is_active = TRUE
+           AND ub.is_active = TRUE
+           AND m.user_a_id = sa.user_id
+           AND m.user_b_id = sb.user_id
+       ),
+       deduped_matches AS (
+         SELECT DISTINCT ON (pair_low, pair_high) *
+         FROM visible_matches
+         ORDER BY pair_low, pair_high, is_unlocked DESC, percentage DESC, created_at DESC
+       )
+       SELECT
+         id,
+         percentage,
+         tier,
+         submission_a_id,
+         submission_b_id,
+         user_a_id,
+         user_b_id,
+         user_a_unlocked,
+         user_b_unlocked,
+         is_active,
+         created_at,
+         is_unlocked,
+         my_submission_id,
+         other_submission_id
+       FROM deduped_matches
+       ORDER BY percentage DESC, created_at DESC`,
       [userId]
     );
 
@@ -56,6 +85,8 @@ const getMatch = async (req, res) => {
          m.id,
          m.percentage,
          m.tier,
+         m.submission_a_id,
+         m.submission_b_id,
          m.user_a_id,
          m.user_b_id,
          m.user_a_unlocked,
@@ -96,6 +127,8 @@ const getMatch = async (req, res) => {
       id: match.id,
       percentage: match.percentage,
       tier: match.tier,
+      submissionAId: match.submission_a_id,
+      submissionBId: match.submission_b_id,
       isUnlocked: match.is_unlocked,
       createdAt: match.created_at,
       mySubmissionId: match.my_submission_id,
