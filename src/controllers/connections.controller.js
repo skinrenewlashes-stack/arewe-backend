@@ -211,17 +211,17 @@ const respondToRequest = async (req, res) => {
     if (request.status === 'accepted' || request.status === 'denied' || request.status === 'declined') {
       return res.status(400).json({ success: false, message: 'Request already responded to.' });
     }
-    if (request.status === 'payment_required') {
+    if (action !== 'decline' && request.status === 'payment_required') {
       return res.status(403).json({
         success: false,
         message: 'Payment required before responding.',
       });
     }
 
-    // Verify recipient has unlocked (paid)
+    // Verify recipient has unlocked (paid) before accepting.
     const isUserA = request.user_a_id === userId;
     const recipientUnlocked = isUserA ? request.user_a_unlocked : request.user_b_unlocked;
-    if (!recipientUnlocked) {
+    if (action !== 'decline' && !recipientUnlocked) {
       return res.status(403).json({
         success: false,
         message: 'You must unlock this match before responding.',
