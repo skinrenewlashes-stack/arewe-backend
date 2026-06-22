@@ -10,12 +10,15 @@ const passwordRules = body('password')
   .matches(/[A-Z]/).withMessage('Password must contain at least one uppercase letter')
   .matches(/[0-9]/).withMessage('Password must contain at least one number');
 
+const localeRule = () => body('locale').optional({ values: 'falsy' }).trim();
+
 router.post('/register',
   [
     body('firstName').optional({ values: 'falsy' }).trim().isLength({ min: 1, max: 100 }).withMessage('First name must be between 1 and 100 characters'),
     body('email').isEmail().normalizeEmail().withMessage('Valid email required'),
     passwordRules,
     body('is18Confirmed').isBoolean().equals('true').withMessage('You must confirm you are 18 or older'),
+    localeRule(),
   ],
   validate,
   authController.register
@@ -37,13 +40,19 @@ router.get('/verify-email/:token',
 );
 
 router.post('/resend-verification',
-  [body('email').isEmail().normalizeEmail().withMessage('Valid email required')],
+  [
+    body('email').isEmail().normalizeEmail().withMessage('Valid email required'),
+    localeRule(),
+  ],
   validate,
   authController.resendVerification
 );
 
 router.post('/forgot-password',
-  [body('email').isEmail().normalizeEmail().withMessage('Valid email required')],
+  [
+    body('email').isEmail().normalizeEmail().withMessage('Valid email required'),
+    localeRule(),
+  ],
   validate,
   authController.forgotPassword
 );

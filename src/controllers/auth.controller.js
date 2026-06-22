@@ -4,10 +4,13 @@ const pool = require('../config/db');
 const { generateAccessToken, generateRefreshToken, verifyToken } = require('../utils/jwt');
 const { sendVerificationEmail, sendPasswordResetEmail } = require('../utils/email');
 
+const resolveLocale = (locale) => (['en', 'fr', 'es'].includes(locale) ? locale : 'en');
+
 const register = async (req, res) => {
   const client = await pool.connect();
   try {
     const { firstName, email, password, is18Confirmed } = req.body;
+    const locale = resolveLocale(req.body.locale);
 
     if (!is18Confirmed) {
       return res.status(400).json({ success: false, message: 'You must confirm you are 18 or older to use AreWe?' });
@@ -43,7 +46,7 @@ const register = async (req, res) => {
     await client.query('COMMIT');
 
     try {
-      await sendVerificationEmail(user.email, verificationToken);
+      await sendVerificationEmail(user.email, verificationToken, locale);
     } catch (emailErr) {
       console.error('Email send failed:', emailErr.message);
     }
@@ -187,6 +190,7 @@ const verifyEmail = async (req, res) => {
 const resendVerification = async (req, res) => {
   try {
     const { email } = req.body;
+    const locale = resolveLocale(req.body.locale);
 
     const result = await pool.query('SELECT id, is_verified FROM users WHERE email = $1', [email.toLowerCase()]);
     if (!result.rows.length) {
@@ -207,7 +211,7 @@ const resendVerification = async (req, res) => {
       [user.id, verificationToken, expiresAt]
     );
 
-    await sendVerificationEmail(email.toLowerCase(), verificationToken);
+    await sendVerificationEmail(email.toLowerCase(), verificationToken, locale);
 
     return res.status(200).json({ success: true, message: 'Verification email sent.' });
   } catch (err) {
@@ -219,6 +223,7 @@ const resendVerification = async (req, res) => {
 const forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
+    const locale = resolveLocale(req.body.locale);
 
     const result = await pool.query('SELECT id FROM users WHERE email = $1 AND is_active = TRUE', [email.toLowerCase()]);
 
@@ -239,7 +244,7 @@ const forgotPassword = async (req, res) => {
       [user.id, resetToken, expiresAt]
     );
 
-    await sendPasswordResetEmail(email.toLowerCase(), resetToken);
+    await sendPasswordResetEmail(email.toLowerCase(), resetToken, locale);
 
     return res.status(200).json({ success: true, message: 'If that email exists, a reset link has been sent.' });
   } catch (err) {
